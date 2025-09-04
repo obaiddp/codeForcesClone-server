@@ -41,10 +41,10 @@ jobs:
     environment:
       name: production
 
+    container: ghcr.io/railwayapp/cli:latest
+
     env:
       RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-      RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
-      RAILWAY_ENV_ID: ${{ secrets.RAILWAY_ENV_ID }}
       RAILWAY_SERVICE_ID: ${{ secrets.RAILWAY_SERVICE_ID }}
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       HEALTH_CHECK_URL: ${{ secrets.HEALTH_CHECK_URL }}
@@ -52,36 +52,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Install deps
-        run: npm ci
-
-      - name: Install Railway CLI
-        run: npm i -g @railway/cli
-
       - name: Debug secrets presence
         run: |
           echo "RAILWAY_TOKEN set? ${{ secrets.RAILWAY_TOKEN != '' }}"
-          echo "PROJECT_ID set? ${{ env.RAILWAY_PROJECT_ID != '' }}"
-          echo "ENV_ID set? ${{ env.RAILWAY_ENV_ID != '' }}"
           echo "SERVICE_ID set? ${{ env.RAILWAY_SERVICE_ID != '' }}"
           echo "DATABASE_URL set? ${{ env.DATABASE_URL != '' }}"
           echo "HEALTH_CHECK_URL set? ${{ env.HEALTH_CHECK_URL != '' }}"
-
-      - name: Authenticate with Railway
-        run: railway login --ci --token $RAILWAY_TOKEN
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
       # Optional: backup
       - name: DB backup (optional)
         if: ${{ env.DATABASE_URL != '' }}
         run: |
-          sudo apt-get update && sudo apt-get install -y postgresql-client
+          apt-get update && apt-get install -y postgresql-client
           pg_dump "$DATABASE_URL" -Fc -f backup-$(date -u +%F-%H%M%S).dump || true
           ls -l backup-*.dump 2>/dev/null || true
 
@@ -89,7 +71,7 @@ jobs:
         run: railway run --service "$RAILWAY_SERVICE_ID" -- npx prisma migrate deploy
 
       - name: Deploy to Railway
-        run: railway up --ci --detach --service "$RAILWAY_SERVICE_ID"
+        run: railway up --service "$RAILWAY_SERVICE_ID"
 
       - name: Smoke check
         if: ${{ env.HEALTH_CHECK_URL != '' }}
