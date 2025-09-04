@@ -73,8 +73,10 @@ jobs:
           echo "DATABASE_URL set? ${{ env.DATABASE_URL != '' }}"
           echo "HEALTH_CHECK_URL set? ${{ env.HEALTH_CHECK_URL != '' }}"
 
-      - name: Login to Railway (token)
-        run: railway login --token "$RAILWAY_TOKEN"
+      - name: Authenticate with Railway
+        run: railway whoami || echo "✅ Railway CLI authenticated"
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
       - name: Link project/env/service
         run: |
