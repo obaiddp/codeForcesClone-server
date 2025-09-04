@@ -59,8 +59,8 @@ jobs:
           echo "DATABASE_URL set? ${{ env.DATABASE_URL != '' }}"
           echo "HEALTH_CHECK_URL set? ${{ env.HEALTH_CHECK_URL != '' }}"
 
-      - name: Run Prisma migrations
-        run: railway run --service "$RAILWAY_SERVICE_ID" -- npx prisma migrate deploy
+      #- name: Run Prisma migrations
+      #  run: railway run --service "$RAILWAY_SERVICE_ID" -- npx prisma migrate deploy
 
       - name: Deploy to Railway
         run: railway up --service "$RAILWAY_SERVICE_ID"
