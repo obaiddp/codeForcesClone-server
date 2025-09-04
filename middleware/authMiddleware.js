@@ -1,22 +1,36 @@
 const jwt = require('jsonwebtoken');
-const User = require('../models/User');
+const { PrismaClient } = require('@prisma/client');
+const prisma = new PrismaClient();
 
-exports.protect = async (req, res, next) => {
-    let token;
-    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-        token = req.headers.authorization.split(' ')[1];
-    }
-
+const protect = async (req, res, next) => {
+  try {
+    const token = req.cookies.token || req.header('Authorization')?.replace('Bearer ', '');
+    
     if (!token) {
-        return res.status(401).json({ message: 'Not authorized, no token' });
+      return res.status(401).json({ message: 'Access denied. No token provided.' });
     }
 
-    console.log('Token accpeted: ', token);
-    try {
-        const decoded = jwt.verify(token, 'JWT_SECRET');
-        req.user = await User.findById(decoded.id).select('-password');
-        next();
-    } catch (err) {
-        res.status(401).json({ message: 'Not authorized, token failed' });
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.id },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true
+      }
+    });
+
+    if (!user) {
+      return res.status(401).json({ message: 'Invalid token.' });
     }
+
+    req.user = user;
+    next();
+  } catch (error) {
+    res.status(400).json({ message: 'Invalid token.' });
+  }
 };
+
+// Export as 'protect' instead of 'authMiddleware'
+module.exports = { protect };

@@ -1,13 +1,14 @@
-// middleware/adminAccess.js
+const adminAccess = (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ message: 'Authentication required' });
+  }
+  
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Admin access required' });
+  }
+  
+  next();
+};
 
-exports.adminAccess = (req, res, next) => {
-    if (!req.user){
-        return res.status(401).json({error: 'Authentication Required'})
-    }
-
-    if (req.user.role !== 'admin'){
-        return res.status(403).json({error: 'Access denied. Admins only'})
-    }
-
-    next();
-}
+// Make sure to export it correctly
+module.exports = { adminAccess };

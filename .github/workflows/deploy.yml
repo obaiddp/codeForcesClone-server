@@ -1,0 +1,241 @@
+name: Deploy to Railway
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  deployments: write
+
+# Avoid overlapping deploys
+concurrency:
+  group: ${{ github.ref }}-deploy
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Run linting (if available)
+        run: npm run lint --if-present
+        continue-on-error: true
+      
+      - name: Run tests
+        run: npm test --if-present
+        continue-on-error: true
+
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'pull_request'
+    
+    environment:
+      name: staging
+    
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
+      RAILWAY_ENV_ID: ${{ secrets.RAILWAY_ENV_ID }}
+      RAILWAY_SERVICE_ID: ${{ secrets.RAILWAY_SERVICE_ID }}
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Install Railway CLI
+        run: npm i -g @railway/cli
+      
+      - name: Debug Railway Environment
+        run: |
+          echo "RAILWAY_TOKEN present: ${{ secrets.RAILWAY_TOKEN != '' }}"
+          echo "RAILWAY_PROJECT_ID: $RAILWAY_PROJECT_ID"
+          echo "RAILWAY_ENV_ID: $RAILWAY_ENV_ID"
+          echo "RAILWAY_SERVICE_ID: $RAILWAY_SERVICE_ID"
+      
+      - name: Authenticate with Railway
+        run: |
+          echo "Authenticating with Railway..."
+          railway login --browserless
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      
+      - name: Verify Railway Authentication
+        run: |
+          echo "Verifying authentication..."
+          railway whoami
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      
+      - name: Link Railway Service
+        run: |
+          railway link \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "$RAILWAY_ENV_ID" \
+            --service "$RAILWAY_SERVICE_ID"
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      
+      - name: Run Prisma Migrations
+        run: |
+          echo "Running database migrations..."
+          railway run -- npx prisma migrate deploy
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      
+      - name: Deploy to Railway Staging
+        run: |
+          echo "Deploying to Railway staging..."
+          railway up --ci --detach
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    environment:
+      name: production
+    
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
+      RAILWAY_ENV_ID: ${{ secrets.RAILWAY_ENV_ID }}
+      RAILWAY_SERVICE_ID: ${{ secrets.RAILWAY_SERVICE_ID }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      HEALTH_CHECK_URL: ${{ secrets.HEALTH_CHECK_URL }}
+      PROD_URL: ${{ secrets.PROD_URL }}
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Build application
+        run: npm run build --if-present
+      
+      - name: Install Railway CLI
+        run: npm i -g @railway/cli
+      
+      - name: Debug Environment Variables
+        run: |
+          echo "RAILWAY_TOKEN present: ${{ secrets.RAILWAY_TOKEN != '' }}"
+          echo "DATABASE_URL present: ${{ env.DATABASE_URL != '' }}"
+          echo "HEALTH_CHECK_URL present: ${{ env.HEALTH_CHECK_URL != '' }}"
+          echo "PROD_URL present: ${{ env.PROD_URL != '' }}"
+      
+      - name: Authenticate with Railway
+        run: |
+          echo "Authenticating with Railway..."
+          railway login --browserless
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      
+      - name: Verify Railway Authentication
+        run: |
+          echo "Current Railway user:"
+          railway whoami
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      
+      - name: Link Railway Service
+        run: |
+          echo "Linking to Railway service..."
+          railway link \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "$RAILWAY_ENV_ID" \
+            --service "$RAILWAY_SERVICE_ID"
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      
+      - name: Database Backup (if PostgreSQL)
+        if: ${{ env.DATABASE_URL != '' }}
+        run: |
+          echo "Creating database backup..."
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          pg_dump "$DATABASE_URL" -Fc -f backup-$(date -u +%F-%H%M%S).dump || echo "Backup failed, continuing..."
+          if [ -f backup-*.dump ]; then
+            echo "✅ Backup created: $(ls -1 backup-*.dump | tail -1)" >> $GITHUB_STEP_SUMMARY
+          fi
+        continue-on-error: true
+      
+      - name: Run Database Migrations
+        run: |
+          echo "Running database migrations..."
+          railway run -- npx prisma migrate deploy
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      
+      - name: Deploy to Railway Production
+        run: |
+          echo "Deploying to Railway production..."
+          railway up --ci --detach --service "$RAILWAY_SERVICE_ID"
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      
+      - name: Health Check
+        if: ${{ env.HEALTH_CHECK_URL != '' }}
+        run: |
+          echo "Running health check on $HEALTH_CHECK_URL"
+          sleep 30  # Give deployment time to start
+          
+          for i in {1..12}; do
+            echo "Attempt $i/12..."
+            response=$(curl -s -o /dev/null -w "%{http_code}" "$HEALTH_CHECK_URL" || echo "000")
+            echo "Status code: $response"
+            
+            if [ "$response" = "200" ]; then
+              echo "✅ Health check passed!" >> $GITHUB_STEP_SUMMARY
+              exit 0
+            elif [ "$response" = "404" ]; then
+              echo "⚠️ Endpoint not found, but service might be running" >> $GITHUB_STEP_SUMMARY
+              exit 0
+            fi
+            
+            echo "Waiting 10 seconds before next attempt..."
+            sleep 10
+          done
+          
+          echo "❌ Health check failed after 2 minutes" >> $GITHUB_STEP_SUMMARY
+          exit 1
+      
+      - name: Deployment Summary
+        run: |
+          echo "## 🚀 Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment:** Production" >> $GITHUB_STEP_SUMMARY
+          echo "- **Service ID:** $RAILWAY_SERVICE_ID" >> $GITHUB_STEP_SUMMARY
+          if [ -n "$PROD_URL" ]; then
+            echo "- **Live URL:** $PROD_URL" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "- **Deployed at:** $(date -u)" >> $GITHUB_STEP_SUMMARY

@@ -1,141 +1,169 @@
-const User = require('../models/User');
-const Problem = require('../models/Problem');
-const Submission = require('../models/Submission')
+const { PrismaClient } = require('@prisma/client');
 const axios = require('axios');
 
+const prisma = new PrismaClient();
+
 exports.createSubmission = async (req, res) => {
-  const { language, version, code, problemId } = req.body;
-
-  // (1) Get the problem and its examples
-  const problem = await Problem.findById(problemId);
-  const testcases = problem.examples;
-
-  let allPassed = true;
-  let results = [];
-
-  for (const tc of testcases) {
-    
-    console.log("Testcase input: ", tc.input)
-    console.log("Testcase output: ", tc.output)
-
     try {
-      // Send code to Piston API for each test case
-      const apiRes = await axios.post('http://localhost:2000/api/v2/execute', {
-        language,
-        version,
-        files: [
-          {
-            name:
-              language === "java"
-                ? "Main.java"
-                : language === "python"
-                ? "main.py"
-                : "main.js",
-            content: code,
-          },
-        ],
-        stdin: String(tc.input),
-      });
+        const { language, version, code, problemId } = req.body;
 
-      const run = apiRes.data.run;
-      const output = (run.stdout || "").trim();
-      const expected = (tc.output || "").trim();
+        // Get the problem and its examples
+        const problem = await prisma.problem.findUnique({
+            where: { id: parseInt(problemId) },
+            include: { examples: true }
+        });
 
-      console.log("======================================");
-      console.log("output from piston: ", output);
-      console.log("expected: ", expected);
+        if (!problem) {
+            return res.status(404).json({ error: 'Problem not found' });
+        }
 
+        const testcases = problem.examples;
+        let allPassed = true;
+        let results = [];
 
-      const passed = output === expected;
+        for (const tc of testcases) {
+            console.log("Testcase input: ", tc.input);
+            console.log("Testcase output: ", tc.output);
 
-      if (!passed) allPassed = false;
+            try {
+                // Send code to Piston API for each test case
+                const apiRes = await axios.post('http://localhost:2000/api/v2/execute', {
+                    language,
+                    version,
+                    files: [
+                        {
+                            name: language === "java" ? "Main.java" : 
+                                  language === "python" ? "main.py" : "main.js",
+                            content: code,
+                        },
+                    ],
+                    stdin: String(tc.input),
+                });
 
-      results.push({
-        input: tc.input,
-        expected,
-        output,
-        passed,
-        executionTime: run.cpu_time,
-      });
+                const run = apiRes.data.run;
+                const output = (run.stdout || "").trim();
+                const expected = (tc.output || "").trim();
 
+                console.log("======================================");
+                console.log("output from piston: ", output);
+                console.log("expected: ", expected);
+
+                const passed = output === expected;
+                if (!passed) allPassed = false;
+
+                results.push({
+                    input: tc.input,
+                    expected,
+                    output,
+                    passed,
+                    executionTime: run.cpu_time,
+                });
+
+            } catch (error) {
+                allPassed = false;
+                results.push({
+                    input: tc.input,
+                    error: error.message,
+                    passed: false
+                });
+            }
+        }
+
+        // Determine final status
+        const status = allPassed ? "accepted" : "rejected";
+        console.log(allPassed);
+        console.log(results);
+
+        // Store submission
+        const newSubmission = await prisma.submission.create({
+            data: {
+                language,
+                version,
+                code,
+                note: "",
+                status,
+                executionTime: results.reduce((sum, r) => sum + (r.executionTime || 0), 0),
+                results,
+                problemId: parseInt(problemId),
+                userId: req.user.id
+            }
+        });
+
+        res.json({ newSubmission });
     } catch (error) {
-      allPassed = false;
-      results.push({
-        input: tc.input,
-        error: error.message,
-        passed: false
-      });
+        res.status(500).json({ error: error.message });
     }
-  }
-
-  // Determine final status
-  const status = allPassed ? "accepted" : "rejected";
-
-  console.log(allPassed);
-  console.log(results);
-
-  // Store submission
-  const newSubmission = await Submission.create({
-    language,
-    version,
-    code,
-    note: "",
-    status,
-    results, // store detailed results
-    user: req.user._id
-  });
-
-  // Link submission to user
-  const user = await User.findById(req.user._id);
-  user.submissions.push(newSubmission._id);
-  await user.save();
-
-  res.json({ newSubmission });
 };
 
-/*
-===> testcase failed:
-
--> Input
--> Output (testcase)
--> Expected
-
-============================
-
-===> testcase passed:
-
--> Input
-
--> Output (testcase)
-
--> Expected
-
-===> all testcases
-
-show all passed testcases on screen
-
-*/
-
-// ===========================================
-
 exports.getSubmission = async (req, res) => {
-  const submissions = await Submission.find(); 
-  res.json(submissions);
+    try {
+        const submissions = await prisma.submission.findMany({
+            include: {
+                problem: {
+                    select: {
+                        id: true,
+                        name: true,
+                        difficulty: true
+                    }
+                },
+                user: {
+                    select: {
+                        id: true,
+                        name: true,
+                        email: true
+                    }
+                }
+            }
+        });
+        res.json(submissions);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
 }
 
 exports.getSubmissionById = async (req, res) => {
-  const submission = await Submission.findById(req.params.id);
-  console.log(submission);
-  res.json(submission);
+    try {
+        const submission = await prisma.submission.findUnique({
+            where: { id: parseInt(req.params.id) },
+            include: {
+                problem: {
+                    select: {
+                        id: true,
+                        name: true,
+                        difficulty: true
+                    }
+                },
+                user: {
+                    select: {
+                        id: true,
+                        name: true,
+                        email: true
+                    }
+                }
+            }
+        });
+        
+        if (!submission) {
+            return res.status(404).json({ error: 'Submission not found' });
+        }
+        
+        res.json(submission);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
 }
 
 exports.updateSubmission = async (req, res) => {
-  const { note } = req.body;
+    try {
+        const { note } = req.body;
 
-  const submission = await Submission.findById(req.params.id);
-  submission.note = note;
+        const submission = await prisma.submission.update({
+            where: { id: parseInt(req.params.id) },
+            data: { note }
+        });
 
-  await submission.save();
-
-  res.json({ message: "Updated", submission });
+        res.json({ message: "Updated", submission });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
 }

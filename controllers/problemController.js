@@ -1,43 +1,62 @@
-const Problem = require('../models/Problem');
-const Solution = require('../models/Solution');
+const { PrismaClient } = require('@prisma/client');
+const prisma = new PrismaClient();
 
 exports.getAllProblems = async (req, res) => {
-    const problems = await Problem.find();
-    console.log('hello');
-    res.json(problems);
+    try {
+        const problems = await prisma.problem.findMany({
+            include: {
+                solutions: true,
+                examples: true
+            }
+        });
+        res.json(problems);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
 }
 
 exports.getProblemById = async (req, res) => {
-    try{
-        const prob = await Problem.findById(req.params.id).populate('solutions');
-        res.json(prob);
-    }
-    catch(err){
-        res.json({ error: err.message })
+    try {
+        const problem = await prisma.problem.findUnique({
+            where: { id: parseInt(req.params.id) },
+            include: {
+                solutions: true,
+                examples: true
+            }
+        });
+        
+        if (!problem) {
+            return res.status(404).json({ error: 'Problem not found' });
+        }
+        
+        res.json(problem);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
     }
 }
 
-
-// Only for Admin
 exports.addProblem = async (req, res) => {
-  try {
-    const { solutions, ...problemData } = req.body;
-    const problem = await Problem.create(problemData);
+    try {
+        const { solutions, examples, ...problemData } = req.body;
+        
+        const problem = await prisma.problem.create({
+            data: {
+                ...problemData,
+                solutions: {
+                    create: solutions || []
+                },
+                examples: {
+                    create: examples || []
+                }
+            },
+            include: {
+                solutions: true,
+                examples: true
+            }
+        });
 
-    if (solutions?.length) {
-      const createdSolutions = await Solution.insertMany(
-        solutions.map(s => ({
-          ...s,
-          problem: problem._id   // attach problem ref here
-        }))
-      );
-      problem.solutions = createdSolutions.map(s => s._id);
-      await problem.save();
+        res.json(problem);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
     }
-
-    res.json(await problem.populate('solutions'));
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
 };
-
