@@ -36,17 +36,123 @@ https://codeforcesclone-server-production.up.railway.app/health
 ----------------------------------
 ----------------------------------
 
+-> old deploy.yml file:
 
+name: Deploy to Railway (main)
 
-B) Add these Environment Secrets (not repo-level)
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
 
-RAILWAY_ENV_ID → Open your Production environment in Railway → Environment settings → Environment ID.
+permissions:
+  contents: read
+  deployments: write
 
-RAILWAY_SERVICE_ID → Click your service (Node API) → Settings → Service ID.
+concurrency:
+  group: prod-deploy
+  cancel-in-progress: false
 
-DATABASE_URL → From your Railway Postgres plugin (or your DB provider).
+jobs:
+  
+  build_test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-HEALTH_CHECK_URL → e.g. https://codeforcesclone-server-production.up.railway.app/health (or / if you don’t have one).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
 
-Important: put these in the Environment (production), not as repository-level secrets. 
-The workflow job has environment: production, so those secrets become available only after the job hits that gated environment.
+      - name: Install deps
+        run: npm ci
+
+      - name: Build (if present)
+        run: npm run build --if-present
+
+      - name: Test (if present)
+        run: npm test --if-present
+
+  deploy_prod:
+    name: Deploy → Migrate → Smoke
+    runs-on: ubuntu-latest
+    needs: build_test
+    environment:
+      name: production   # <- uses Environment secrets
+
+    # Make secrets available to all steps
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
+      RAILWAY_ENV_ID: ${{ secrets.RAILWAY_ENV_ID }}
+      RAILWAY_SERVICE_ID: ${{ secrets.RAILWAY_SERVICE_ID }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      HEALTH_CHECK_URL: ${{ secrets.HEALTH_CHECK_URL }} # e.g. https://.../health
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Install Railway CLI
+        run: npm i -g @railway/cli
+
+      - name: Debug secrets presence
+        run: |
+          echo "RAILWAY_TOKEN set? ${{ secrets.RAILWAY_TOKEN != '' }}"
+          echo "PROJECT_ID set? ${{ env.RAILWAY_PROJECT_ID != '' }}"
+          echo "ENV_ID set? ${{ env.RAILWAY_ENV_ID != '' }}"
+          echo "SERVICE_ID set? ${{ env.RAILWAY_SERVICE_ID != '' }}"
+          echo "DATABASE_URL set? ${{ env.DATABASE_URL != '' }}"
+          echo "HEALTH_CHECK_URL set? ${{ env.HEALTH_CHECK_URL != '' }}"
+
+      - name: Authenticate with Railway
+        run: railway whoami || echo "✅ Railway CLI authenticated"
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
+      - name: Link Railway Services
+        run: |
+          RAILWAY_TOKEN=${{ secrets.RAILWAY_TOKEN }} railway link \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "$RAILWAY_ENV_ID" \
+            --service "$RAILWAY_SERVICE_ID"
+
+      # Optional: backup if you’re on Postgres and provided DATABASE_URL
+      - name: DB backup (optional)
+        if: ${{ env.DATABASE_URL != '' }}
+        run: |
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          pg_dump "$DATABASE_URL" -Fc -f backup-$(date -u +%F-%H%M%S).dump || true
+          ls -l backup-*.dump 2>/dev/null || true
+
+      - name: Run Prisma migrations
+        run: railway run -- npx prisma migrate deploy
+
+      - name: Deploy to Railway
+        run: railway up --ci --detach --service "$RAILWAY_SERVICE_ID"
+
+      - name: Smoke check
+        if: ${{ env.HEALTH_CHECK_URL != '' }}
+        run: |
+          echo "Hitting $HEALTH_CHECK_URL"
+          for i in {1..18}; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" "$HEALTH_CHECK_URL" || echo "000")
+            echo "Attempt $i/18 → $code"
+            if [ "$code" = "200" ] || [ "$code" = "404" ]; then
+              echo "✅ Service reachable (HTTP $code)"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "❌ Health check failed"
+          exit 1
+

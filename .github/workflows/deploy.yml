@@ -14,7 +14,6 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  
   build_test:
     name: Build & Test
     runs-on: ubuntu-latest
@@ -40,16 +39,15 @@ jobs:
     runs-on: ubuntu-latest
     needs: build_test
     environment:
-      name: production   # <- uses Environment secrets
+      name: production
 
-    # Make secrets available to all steps
     env:
       RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
       RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
       RAILWAY_ENV_ID: ${{ secrets.RAILWAY_ENV_ID }}
       RAILWAY_SERVICE_ID: ${{ secrets.RAILWAY_SERVICE_ID }}
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
-      HEALTH_CHECK_URL: ${{ secrets.HEALTH_CHECK_URL }} # e.g. https://.../health
+      HEALTH_CHECK_URL: ${{ secrets.HEALTH_CHECK_URL }}
 
     steps:
       - uses: actions/checkout@v4
@@ -74,19 +72,7 @@ jobs:
           echo "DATABASE_URL set? ${{ env.DATABASE_URL != '' }}"
           echo "HEALTH_CHECK_URL set? ${{ env.HEALTH_CHECK_URL != '' }}"
 
-      - name: Authenticate with Railway
-        run: railway whoami || echo "✅ Railway CLI authenticated"
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
-
-      - name: Link Railway Services
-        run: |
-          RAILWAY_TOKEN=${{ secrets.RAILWAY_TOKEN }} railway link \
-            --project "$RAILWAY_PROJECT_ID" \
-            --environment "$RAILWAY_ENV_ID" \
-            --service "$RAILWAY_SERVICE_ID"
-
-      # Optional: backup if you’re on Postgres and provided DATABASE_URL
+      # Optional: backup
       - name: DB backup (optional)
         if: ${{ env.DATABASE_URL != '' }}
         run: |
@@ -95,10 +81,12 @@ jobs:
           ls -l backup-*.dump 2>/dev/null || true
 
       - name: Run Prisma migrations
-        run: railway run -- npx prisma migrate deploy
+        run: |
+          RAILWAY_TOKEN=${{ secrets.RAILWAY_TOKEN }} railway run --service "$RAILWAY_SERVICE_ID" -- npx prisma migrate deploy
 
       - name: Deploy to Railway
-        run: railway up --ci --detach --service "$RAILWAY_SERVICE_ID"
+        run: |
+          RAILWAY_TOKEN=${{ secrets.RAILWAY_TOKEN }} railway up --ci --detach --service "$RAILWAY_SERVICE_ID"
 
       - name: Smoke check
         if: ${{ env.HEALTH_CHECK_URL != '' }}
