@@ -45,7 +45,7 @@ app.use('/api/submissions', submissionRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-  res.json({ status: 'OK', message: 'Server is running' });
+  res.status(200).json({ status: 'ok', uptime: process.uptime() });
 });
 
 // Error handling middleware

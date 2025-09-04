@@ -1,1 +1,52 @@
 npm run migrate && npm run start
+
+GitHub-Actions-Token: fd4942af-5eb9-49c7-838e-f352fa2e34a9
+
+Enviornment -> Setting -> 
+RAILWAY_PROJECT_ID: 17df094b-bdee-4ec6-b5ff-4bb54b53302b
+
+
+RAILWAY_ENV_ID: 
+
+
+----------------------------------
+----------------------------------
+----------------------------------
+
+
+(1) RAILWAY_TOKEN
+fd4942af-5eb9-49c7-838e-f352fa2e34a9
+
+(2) RAILWAY_PROJECT_ID
+17df094b-bdee-4ec6-b5ff-4bb54b53302b
+
+(3) RAILWAY_ENV_ID
+7b8b91c7-aa8a-42c9-8cdd-fe35e27b421c
+
+(4) RAILWAY_SERVICE_ID
+2b01d8d7-dcf3-4d0c-a80d-3026eaff166e
+
+(5) DATABASE_URL
+postgresql://postgres:gnQdUFmUFuoDULgCpWbZPCQGioUjIvBO@postgres.railway.internal:5432/railway
+
+(6) HEALTH_CHECK_URL
+https://codeforcesclone-server-production.up.railway.app/health
+
+----------------------------------
+----------------------------------
+----------------------------------
+
+
+
+B) Add these Environment Secrets (not repo-level)
+
+RAILWAY_ENV_ID → Open your Production environment in Railway → Environment settings → Environment ID.
+
+RAILWAY_SERVICE_ID → Click your service (Node API) → Settings → Service ID.
+
+DATABASE_URL → From your Railway Postgres plugin (or your DB provider).
+
+HEALTH_CHECK_URL → e.g. https://codeforcesclone-server-production.up.railway.app/health (or / if you don’t have one).
+
+Important: put these in the Environment (production), not as repository-level secrets. 
+The workflow job has environment: production, so those secrets become available only after the job hits that gated environment.
