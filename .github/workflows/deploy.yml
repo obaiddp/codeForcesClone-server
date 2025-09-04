@@ -59,14 +59,6 @@ jobs:
           echo "DATABASE_URL set? ${{ env.DATABASE_URL != '' }}"
           echo "HEALTH_CHECK_URL set? ${{ env.HEALTH_CHECK_URL != '' }}"
 
-      # Optional: backup
-      - name: DB backup (optional)
-        if: ${{ env.DATABASE_URL != '' }}
-        run: |
-          apt-get update && apt-get install -y postgresql-client
-          pg_dump "$DATABASE_URL" -Fc -f backup-$(date -u +%F-%H%M%S).dump || true
-          ls -l backup-*.dump 2>/dev/null || true
-
       - name: Run Prisma migrations
         run: railway run --service "$RAILWAY_SERVICE_ID" -- npx prisma migrate deploy
 
