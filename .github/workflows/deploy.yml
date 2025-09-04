@@ -64,6 +64,9 @@ jobs:
 
       - name: Deploy to Railway
         run: railway up --service "$RAILWAY_SERVICE_ID"
+      
+      - name: Install curl
+        run: apk add --no-cache curl || apt-get update && apt-get install -y curl
 
       - name: Smoke check
         if: ${{ env.HEALTH_CHECK_URL != '' }}
