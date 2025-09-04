@@ -72,6 +72,11 @@ jobs:
           echo "DATABASE_URL set? ${{ env.DATABASE_URL != '' }}"
           echo "HEALTH_CHECK_URL set? ${{ env.HEALTH_CHECK_URL != '' }}"
 
+      - name: Authenticate with Railway
+        run: railway login --ci --token $RAILWAY_TOKEN
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
       # Optional: backup
       - name: DB backup (optional)
         if: ${{ env.DATABASE_URL != '' }}
@@ -81,12 +86,10 @@ jobs:
           ls -l backup-*.dump 2>/dev/null || true
 
       - name: Run Prisma migrations
-        run: |
-          RAILWAY_TOKEN=${{ secrets.RAILWAY_TOKEN }} railway run --service "$RAILWAY_SERVICE_ID" -- npx prisma migrate deploy
+        run: railway run --service "$RAILWAY_SERVICE_ID" -- npx prisma migrate deploy
 
       - name: Deploy to Railway
-        run: |
-          RAILWAY_TOKEN=${{ secrets.RAILWAY_TOKEN }} railway up --ci --detach --service "$RAILWAY_SERVICE_ID"
+        run: railway up --ci --detach --service "$RAILWAY_SERVICE_ID"
 
       - name: Smoke check
         if: ${{ env.HEALTH_CHECK_URL != '' }}
